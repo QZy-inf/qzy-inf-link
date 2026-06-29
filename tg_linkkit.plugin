@@ -12,7 +12,7 @@ __id__ = "tg_linkkit"
 __name__ = "TG LinkKit"
 __description__ = "Копирует ссылки, mention, QR и Ultimate-карточку Telegram-профиля/чата."
 __author__ = "@qzy_moderator"
-__version__ = "1.3.8"
+__version__ = "1.3.9"
 __icon__ = "QZy44/0"
 __app_version__ = ">=12.5.1"
 __sdk_version__ = ">=1.4.3.3"
@@ -78,6 +78,7 @@ STRINGS = {
         "resolve": "tg://resolve",
         "debug": "Debug",
         "ultimate": "Ultimate dossier",
+        "entity_info": "Инфо объекта",
         "qr": "Telegram QR",
         "qr_opened": "QR открыт",
         "qr_fallback": "QR недоступен, ссылка скопирована",
@@ -89,6 +90,11 @@ STRINGS = {
         "yes": "да",
         "no": "нет",
         "unknown": "неизвестно",
+        "approx": "примерно",
+        "channel": "канал",
+        "group": "группа",
+        "supergroup": "супергруппа",
+        "bot": "бот",
         "profile": "Profile",
         "name": "Name",
         "type": "Type",
@@ -120,6 +126,7 @@ STRINGS = {
         "resolve": "tg://resolve",
         "debug": "Debug",
         "ultimate": "Ultimate dossier",
+        "entity_info": "Entity info",
         "qr": "Telegram QR",
         "qr_opened": "QR opened",
         "qr_fallback": "QR is unavailable, link copied",
@@ -131,6 +138,11 @@ STRINGS = {
         "yes": "yes",
         "no": "no",
         "unknown": "unknown",
+        "approx": "approx.",
+        "channel": "channel",
+        "group": "group",
+        "supergroup": "supergroup",
+        "bot": "bot",
         "profile": "Profile",
         "name": "Name",
         "type": "Type",
@@ -288,6 +300,63 @@ def is_user_entity(entity, dialog_id):
         return True
 
 
+def entity_kind_key(entity, dialog_id):
+    if is_user_entity(entity, dialog_id):
+        try:
+            if bool(getattr(entity, "bot", False)):
+                return "bot"
+        except Exception:
+            pass
+        return "user"
+    try:
+        if bool(getattr(entity, "broadcast", False)):
+            return "channel"
+    except Exception:
+        pass
+    try:
+        if bool(getattr(entity, "megagroup", False)) or bool(getattr(entity, "gigagroup", False)):
+            return "supergroup"
+    except Exception:
+        pass
+    cls = type(entity).__name__.lower() if entity else ""
+    if "channel" in cls:
+        return "channel"
+    return "group"
+
+
+def format_count(value, approximate=False, lang=LANG_RU):
+    value = safe_int(value, 0)
+    if value <= 0:
+        return ""
+    text = "{:,}".format(value).replace(",", " ")
+    if approximate:
+        text = "≈ " + text
+    return text
+
+
+def unwrap_full_objects(full_info):
+    objects = []
+    if full_info:
+        objects.append(full_info)
+        for field in ["full_chat", "fullChat", "chatFull", "userFull", "user_full", "full"]:
+            value = get_field(full_info, field, None)
+            if value and value not in objects:
+                objects.append(value)
+    return objects
+
+
+def first_field(objects, fields, default=None):
+    for obj in objects:
+        if not obj:
+            continue
+        for field in fields:
+            value = get_field(obj, field, None)
+            if value is None or value == "":
+                continue
+            return value
+    return default
+
+
 def escape_markdown(text):
     text = safe_str(text)
     for ch in ["\\", "[", "]", "(", ")"]:
@@ -329,11 +398,13 @@ def compact_value(value):
     return value
 
 
-def collect_entity_facts(entity, lang, include_raw):
+def collect_entity_facts(entity, full_info, lang, include_raw):
     if not entity:
         return []
 
     facts = []
+    user_like = is_user_entity(entity, 0)
+    kind_key = entity_kind_key(entity, 0)
     usernames = []
     for username_obj in iter_collection(getattr(entity, "usernames", None)):
         username = clean_username(getattr(username_obj, "username", username_obj))
@@ -350,27 +421,32 @@ def collect_entity_facts(entity, lang, include_raw):
     if usernames:
         facts.append(("Usernames", ", ".join(usernames)))
 
-    for label, field in [
+    common_fields = [
         ("Class", "__class__"),
-        ("First name", "first_name"),
-        ("Last name", "last_name"),
-        ("Title", "title"),
-        ("Phone visible", "phone"),
-        ("Bot", "bot"),
         ("Verified", "verified"),
         ("Scam", "scam"),
         ("Fake", "fake"),
-        ("Premium", "premium"),
-        ("Support", "support"),
         ("Restricted", "restricted"),
-        ("Deleted", "deleted"),
-        ("Broadcast", "broadcast"),
-        ("Megagroup", "megagroup"),
-        ("Gigagroup", "gigagroup"),
         ("Creator", "creator"),
         ("Left", "left"),
         ("Min", "min"),
-    ]:
+    ]
+    user_fields = [
+        ("First name", "first_name"),
+        ("Last name", "last_name"),
+        ("Phone visible", "phone"),
+        ("Bot", "bot"),
+        ("Premium", "premium"),
+        ("Support", "support"),
+        ("Deleted", "deleted"),
+    ]
+    chat_fields = [
+        ("Title", "title"),
+        ("Broadcast", "broadcast"),
+        ("Megagroup", "megagroup"),
+        ("Gigagroup", "gigagroup"),
+    ]
+    for label, field in common_fields + (user_fields if user_like else chat_fields):
         if field == "__class__":
             value = type(entity).__name__
         else:
@@ -382,6 +458,52 @@ def collect_entity_facts(entity, lang, include_raw):
         elif field == "phone":
             value = bool_text(True, lang)
         facts.append((label, compact_value(value)))
+
+    objects = [entity] + unwrap_full_objects(full_info)
+    intel = []
+    if user_like:
+        about = first_field(objects, ["about", "bio"])
+        common_chats = first_field(objects, ["common_chats_count"])
+        if about:
+            intel.append(("About", compact_value(about)))
+        if common_chats:
+            intel.append(("Common chats", format_count(common_chats)))
+    else:
+        if kind_key == "channel":
+            member_label = "Subscribers"
+        elif kind_key == "supergroup":
+            member_label = "Members"
+        else:
+            member_label = "Participants"
+        participants = first_field(objects, ["participants_count", "members_count", "participantsCount", "membersCount"])
+        online = first_field(objects, ["online_count", "onlineCount"])
+        admins = first_field(objects, ["admins_count", "adminsCount"])
+        banned = first_field(objects, ["banned_count", "bannedCount"])
+        kicked = first_field(objects, ["kicked_count", "kickedCount"])
+        about = first_field(objects, ["about"])
+        linked_chat_id = first_field(objects, ["linked_chat_id", "linkedChatId"])
+        slowmode = first_field(objects, ["slowmode_seconds", "slowmodeSeconds"])
+        messages_approx = first_field(objects, ["top_message", "read_inbox_max_id", "read_outbox_max_id", "pts"])
+        for label, value, approx in [
+            (member_label, participants, True),
+            ("Online", online, True),
+            ("Admins", admins, True),
+            ("Banned", banned, True),
+            ("Kicked", kicked, True),
+            ("Messages", messages_approx, True),
+        ]:
+            formatted = format_count(value, approx, lang)
+            if formatted:
+                intel.append((label, formatted))
+        if slowmode:
+            intel.append(("Slowmode seconds", format_count(slowmode)))
+        if linked_chat_id:
+            intel.append(("Linked chat id", safe_str(linked_chat_id)))
+        if about:
+            intel.append(("About", compact_value(about)))
+    if intel:
+        facts.append(("Entity type", tr(lang, kind_key)))
+        facts.extend(intel)
 
     if include_raw:
         for field in ["access_hash", "restriction_reason", "dc_id", "photo", "status"]:
@@ -395,6 +517,7 @@ def collect_entity_facts(entity, lang, include_raw):
 def build_diagnostics(values, lang):
     lines = [
         "TG LinkKit diagnostics",
+        "Entity type: " + values["type"],
         "Best link: " + bool_text(bool(values["best"]), lang),
         "Public t.me: " + bool_text(bool(values["profile"] and values["profile"] != "-"), lang),
         "Username: " + bool_text(bool(values["at_username"]), lang),
@@ -406,6 +529,27 @@ def build_diagnostics(values, lang):
         "",
         tr(lang, "ultimate_note"),
     ]
+    return "\n".join(lines)
+
+
+def build_entity_info(values, facts, lang):
+    lines = [
+        "TG LinkKit Entity Info",
+        "",
+        "Target",
+        "Name: " + values["name"],
+        "Type: " + values["type"],
+        "Username: " + (values["at_username"] or "-"),
+    ]
+    if values["id"]:
+        lines.append("ID: " + values["id"])
+    if values["best"]:
+        lines.append("Best: " + values["best"])
+    if facts:
+        lines.extend(["", "Available data"])
+        for label, value in facts:
+            lines.append(label + ": " + safe_str(value))
+    lines.extend(["", "Note", tr(lang, "ultimate_note")])
     return "\n".join(lines)
 
 
@@ -491,7 +635,7 @@ def build_card(values, style, template):
     return apply_template(template or DEFAULT_TEMPLATE, values)
 
 
-def build_formats(entity, dialog_id, options=None):
+def build_formats(entity, dialog_id, options=None, full_info=None):
     options = options or {}
     lang = safe_int(options.get("lang", LANG_RU), LANG_RU)
     show_id = bool(options.get("show_id", True))
@@ -503,7 +647,8 @@ def build_formats(entity, dialog_id, options=None):
     username = get_entity_username(entity)
     name = display_name(entity)
     user_like = is_user_entity(entity, dialog_id)
-    kind = tr(lang, "user") if user_like else tr(lang, "chat")
+    kind_key = entity_kind_key(entity, dialog_id)
+    kind = tr(lang, kind_key)
 
     tme = "https://t.me/" + username if username else ""
     at_username = "@" + username if username else ""
@@ -541,7 +686,8 @@ def build_formats(entity, dialog_id, options=None):
         "mention_html": mention_html,
     }
     card = build_card(values, card_style, card_template)
-    facts = collect_entity_facts(entity, lang, include_ultimate_raw)
+    facts = collect_entity_facts(entity, full_info, lang, include_ultimate_raw)
+    entity_info = build_entity_info(values, facts, lang)
     diagnostics = build_diagnostics(values, lang)
     ultimate = build_ultimate_dossier(values, facts, lang)
 
@@ -559,6 +705,7 @@ def build_formats(entity, dialog_id, options=None):
     items = [
         (tr(lang, "best"), best, bool(best), "best"),
         (tr(lang, "ultimate"), ultimate, True, "ultimate"),
+        (tr(lang, "entity_info"), entity_info, True, "entity_info"),
         (tr(lang, "card"), card, True, "card"),
         (tr(lang, "qr"), qr_target, bool(qr_target), "qr"),
         (tr(lang, "md"), mention_md, True, "md"),
@@ -662,6 +809,27 @@ class TGLinkKitPlugin(BasePlugin):
                 candidate = getattr(result, "user", None) or getattr(result, "chat", None) or result
                 if candidate and get_entity_username(candidate):
                     return candidate
+            except Exception:
+                pass
+        return None
+
+    def get_full_info(self, entity, dialog_id):
+        entity_id = get_entity_id(entity, dialog_id)
+        if not entity_id:
+            return None
+        controller = get_messages_controller()
+        if is_user_entity(entity, dialog_id):
+            method_names = ["getUserFull"]
+            lookup_id = entity_id
+        else:
+            method_names = ["getChatFull"]
+            lookup_id = abs(entity_id)
+        for method_name in method_names:
+            try:
+                method = getattr(controller, method_name)
+                result = method(lookup_id)
+                if result:
+                    return result
             except Exception:
                 pass
         return None
@@ -782,7 +950,8 @@ class TGLinkKitPlugin(BasePlugin):
                 BulletinHelper.show_error(tr(lang, "target_error"))
                 return
 
-            name, username, entity_id, formats = build_formats(entity, dialog_id, self.get_options())
+            full_info = self.get_full_info(entity, dialog_id)
+            name, username, entity_id, formats = build_formats(entity, dialog_id, self.get_options(), full_info)
             action_key = self.quick_action_key()
             if action_key:
                 for label, value, enabled, key in formats:
@@ -846,6 +1015,7 @@ class TGLinkKitPlugin(BasePlugin):
         hints = {
             "best": "рекомендуется",
             "ultimate": "полный набор",
+            "entity_info": "тип и цифры",
             "card": "красиво",
             "qr": "Telegram QR",
             "md": "Markdown",
@@ -864,6 +1034,7 @@ class TGLinkKitPlugin(BasePlugin):
         icons = {
             "best": "🔗",
             "ultimate": "✨",
+            "entity_info": "i",
             "card": "◼",
             "qr": "▦",
             "md": "M",
@@ -1214,8 +1385,13 @@ class TGLinkKitPlugin(BasePlugin):
             Header(text="Ultimate & QR"),
             Text(
                 text="Ultimate dossier",
-                subtext="Копирует техническую карточку из данных, уже доступных вашему Telegram-клиенту.",
+                subtext="Копирует техническую карточку, ссылки и типовые цифры для user/chat/channel, если клиент их видит.",
                 icon="msg_contact",
+            ),
+            Text(
+                text="Инфо объекта",
+                subtext="Отдельно копирует тип цели и доступные счётчики: подписчики, участники, online, сообщения примерно.",
+                icon="msg_info",
             ),
             Text(
                 text="Источник данных",

@@ -2,7 +2,7 @@
 
 Compact Telegram client plugin for copying profile and chat links.
 
-![version](https://img.shields.io/badge/version-1.3.8-black)
+![version](https://img.shields.io/badge/version-1.3.9-black)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![runtime](https://img.shields.io/badge/plugin%20SDK-%3E%3D1.4.3.3-2ea44f)
 
@@ -19,6 +19,7 @@ TG LinkKit adds a menu action for supported Telegram clients and copies useful f
 - HTML mention;
 - native Telegram QR, when supported by the client;
 - LinkKit card;
+- type-aware entity info for users, bots, groups, supergroups and channels;
 - Ultimate dossier.
 
 ## Compatibility
@@ -69,7 +70,7 @@ It only reads the current Telegram client context and copies selected text to yo
 
 ## Version
 
-Current version: `1.3.8`
+Current version: `1.3.9`
 
 ## License
 

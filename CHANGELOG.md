@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.9 - 2026-06-29
+
+- Added type-aware entity info for users, bots, groups, supergroups and channels.
+- Ultimate dossier now includes relevant visible counters for chats/channels when Telegram exposes them: subscribers/members/participants, online, admins, banned/kicked and approximate message index.
+- Added separate `Entity info` menu action for copying only target type and available counters.
+- Kept personal-only fields out of channel/chat output and chat/channel-only counters out of user output.
+- Marked estimated numeric counters with `≈` where Telegram does not provide an exact total.
+
 ## 1.3.8 - 2026-06-29
 
 - Fixed `show_id = false` privacy behavior: numeric IDs/deep links no longer leak through Best link, QR, Markdown/HTML mention, menu headers or debug.
